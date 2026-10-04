@@ -15,9 +15,64 @@ const CONFIG = { default: wllamaWasmUrl };
 const MAX_MODEL_BYTES = 2 * 1024 * 1024 * 1024;
 const GGUF_MAGIC = 'GGUF';
 
+// Qwen3-0.6B is small enough to offload completely on most WebGPU phones.
+// Wllama treats 0 as an explicit CPU-only request, so never use it on the
+// normal WebGPU path.
+const GPU_LAYERS = 99999;
+const MODEL_OPTIONS = {
+  n_ctx: 1024,
+  n_batch: 128,
+  n_ubatch: 128,
+  n_parallel: 1,
+  reasoning: false,
+  warmup: false,
+};
+
 async function isGgufFile(file: File) {
   const bytes = new Uint8Array(await file.slice(0, 4).arrayBuffer());
   return String.fromCharCode(...bytes) === GGUF_MAGIC;
+}
+
+type WebGpuInfo = {
+  api: boolean;
+  adapter: boolean;
+  shaderF16: boolean;
+};
+
+async function getWebGpuInfo(): Promise<WebGpuInfo> {
+  const gpu = (navigator as Navigator & {
+    gpu?: {
+      requestAdapter: () => Promise<{ features: { has: (name: string) => boolean } } | null>;
+    };
+  }).gpu;
+
+  if (!gpu) return { api: false, adapter: false, shaderF16: false };
+
+  try {
+    const adapter = await gpu.requestAdapter();
+    if (!adapter) return { api: true, adapter: false, shaderF16: false };
+
+    return {
+      api: true,
+      adapter: true,
+      shaderF16: adapter.features.has('shader-f16'),
+    };
+  } catch {
+    return { api: true, adapter: false, shaderF16: false };
+  }
+}
+
+function createEngine() {
+  return new Wllama(CONFIG, {
+    allowOffline: true,
+    suppressNativeLog: true,
+    logger: {
+      debug: () => {},
+      log: () => {},
+      warn: (...args) => console.warn(...args),
+      error: (...args) => console.error(...args),
+    },
+  });
 }
 
 export default function App() {
@@ -35,9 +90,36 @@ export default function App() {
 
   const canChat = Boolean(engine.current) && !loading && !generating;
   const runtimeLabel = useMemo(
-    () => gpu === true ? 'WebGPU available' : gpu === false ? 'WASM / CPU fallback' : 'Runtime not initialized',
+    () => gpu === true ? 'WebGPU acceleration' : gpu === false ? 'WASM / CPU fallback' : 'Runtime not initialized',
     [gpu],
   );
+
+  async function cleanupEngine() {
+    const current = engine.current;
+    engine.current = null;
+
+    if (current) {
+      try {
+        await current.exit();
+      } catch {
+        // A partially initialized worker may already have aborted.
+      }
+    }
+  }
+
+  async function loadWithBackend(file: File, useGpu: boolean) {
+    const nextEngine = createEngine();
+    const options = {
+      ...MODEL_OPTIONS,
+      n_gpu_layers: useGpu ? GPU_LAYERS : 0,
+    };
+
+    setStatus(useGpu ? 'Initializing WebGPU…' : 'Initializing WASM/CPU…');
+    await nextEngine.loadModel([file], options);
+
+    engine.current = nextEngine;
+    return nextEngine;
+  }
 
   async function selectModel(file: File) {
     setModelFile(file);
@@ -45,6 +127,7 @@ export default function App() {
     setLoading(true);
     setTokensPerSecond(null);
     setDiagnostics(null);
+    setGpu(null);
 
     try {
       if (!file.name.toLowerCase().endsWith('.gguf')) {
@@ -60,50 +143,50 @@ export default function App() {
         throw new Error('The selected file is not a valid GGUF file (missing GGUF header).');
       }
 
-      try {
-        await engine.current?.exit();
-      } catch {
-        // A partially initialized Wllama worker may already have aborted.
+      await cleanupEngine();
+
+      const webGpu = await getWebGpuInfo();
+      const wllamaProbe = createEngine();
+      const wllamaSupportsGpu = wllamaProbe.isSupportWebGPU();
+      await wllamaProbe.exit().catch(() => {});
+
+      // Current Wllama WebGPU builds require shader-f16. Checking the adapter
+      // first avoids a known Chromium abort on devices exposing WebGPU without
+      // that feature.
+      const shouldUseGpu = webGpu.api &&
+        webGpu.adapter &&
+        webGpu.shaderF16 &&
+        wllamaSupportsGpu;
+
+      let activeEngine: Wllama | null = null;
+
+      if (shouldUseGpu) {
+        try {
+          activeEngine = await loadWithBackend(file, true);
+          setGpu(true);
+          setStatus('Ready — WebGPU acceleration enabled');
+        } catch (gpuError) {
+          console.warn('WebGPU model load failed; falling back to CPU.', gpuError);
+          await cleanupEngine();
+          setStatus('WebGPU failed to initialize — falling back to WASM/CPU…');
+
+          activeEngine = await loadWithBackend(file, false);
+          setGpu(false);
+          setStatus('Ready — WASM/CPU fallback');
+        }
+      } else {
+        activeEngine = await loadWithBackend(file, false);
+        setGpu(false);
+        setStatus(
+          webGpu.api
+            ? 'Ready — WASM/CPU fallback (WebGPU adapter/shader-f16 unavailable)'
+            : 'Ready — WASM/CPU fallback',
+        );
       }
-      engine.current = null;
 
-      const nextEngine = new Wllama(CONFIG, {
-        allowOffline: true,
-        suppressNativeLog: false,
-        logger: {
-          debug: () => {},
-          log: () => {},
-          warn: (...args) => console.warn(...args),
-          error: (...args) => console.error(...args),
-        },
-      });
-
-      const supportsGpu = nextEngine.isSupportWebGPU();
-      setGpu(supportsGpu);
-      setStatus('Loading locally… CPU/WASM mode');
-
-      // Android/Chromium is deliberately CPU-only here. Wllama 3.8.x uses
-      // n_gpu_layers: 0 to skip WebGPU device initialization entirely.
-      // Conservative context/batch/sequence settings also reduce mobile RAM use.
-      await nextEngine.loadModel([file], {
-        n_ctx: 1024,
-        n_batch: 16,
-        n_ubatch: 16,
-        n_parallel: 1,
-        n_gpu_layers: 0,
-        reasoning: false,
-        warmup: false,
-      });
-
-      engine.current = nextEngine;
-      setStatus(`Ready — WASM/CPU${supportsGpu ? ' (WebGPU available, disabled for stability)' : ''}`);
+      if (!activeEngine) throw new Error('The inference engine could not be initialized.');
     } catch (error) {
-      try {
-        await engine.current?.exit();
-      } catch {
-        // Ignore cleanup failures after an aborted WASM worker.
-      }
-      engine.current = null;
+      await cleanupEngine();
       setGpu(null);
 
       const message = formatError('Load failed', error);
@@ -114,7 +197,7 @@ export default function App() {
         `SharedArrayBuffer: ${typeof SharedArrayBuffer !== 'undefined' ? 'available' : 'unavailable'}`,
         `Cross-origin isolated: ${crossOriginIsolated ? 'yes' : 'no'}`,
         message,
-      ].join('\n');
+      ].join('\\n');
 
       setDiagnostics(runtime);
       setStatus(message);
@@ -135,6 +218,12 @@ export default function App() {
 
     const started = performance.now();
     let generated = '';
+    let frame: number | null = null;
+
+    const flush = () => {
+      frame = null;
+      setMessages([...next, { role: 'assistant', content: generated }]);
+    };
 
     try {
       await engine.current.createChatCompletion({
@@ -146,14 +235,27 @@ export default function App() {
         onData: (chunk) => {
           const token = getStreamToken(chunk);
           if (!token) return;
+
           generated += token;
-          setMessages([...next, { role: 'assistant', content: generated }]);
+
+          // Token callbacks can arrive much faster than React needs to render.
+          // Coalesce them to animation frames so streaming does not become the
+          // bottleneck on mobile browsers.
+          if (frame === null) {
+            frame = requestAnimationFrame(flush);
+          }
         },
       });
 
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+        frame = null;
+      }
+      setMessages([...next, { role: 'assistant', content: generated }]);
       setTokensPerSecond(estimateTokensPerSecond(generated, performance.now() - started));
       setStatus('Ready');
     } catch (error) {
+      if (frame !== null) cancelAnimationFrame(frame);
       const message = formatError('Generation failed', error);
       setMessages([...next, { role: 'assistant', content: message }]);
       setStatus('Generation failed.');
@@ -163,13 +265,7 @@ export default function App() {
   }
 
   async function unload() {
-    try {
-      await engine.current?.exit();
-    } catch {
-      // Ignore worker cleanup errors.
-    }
-
-    engine.current = null;
+    await cleanupEngine();
     setGpu(null);
     setModelFile(null);
     setMessages([]);
@@ -257,7 +353,15 @@ export default function App() {
 
     <footer>
       <span>Wllama + llama.cpp · no inference server</span>
-      <span>{'gpu' in navigator ? 'WebGPU detected (disabled for CPU baseline)' : 'WebGPU unavailable'}</span>
+      <span>
+        {'gpu' in navigator
+          ? gpu === true
+            ? 'WebGPU active'
+            : gpu === false
+              ? 'WebGPU detected · CPU fallback'
+              : 'WebGPU detected'
+          : 'WebGPU unavailable'}
+      </span>
     </footer>
   </main>;
 }
