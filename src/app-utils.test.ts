@@ -3,6 +3,7 @@ import {
   estimateTokensPerSecond,
   formatError,
   getStreamToken,
+  shouldUseWebGPU,
   toChatMessages,
   type ChatMessage,
 } from './app-utils';
@@ -55,5 +56,29 @@ describe('formatError', () => {
 
   it('provides a useful fallback for empty abort errors', () => {
     expect(formatError('Load failed', new Error(''))).toContain('browser/WASM runtime aborted');
+  });
+});
+
+
+describe('shouldUseWebGPU', () => {
+  it('enables GPU inference only when the browser and Wllama are ready', () => {
+    expect(shouldUseWebGPU(
+      { api: true, adapter: true, shaderF16: true },
+      true,
+    )).toBe(true);
+  });
+
+  it('rejects WebGPU when shader-f16 is unavailable', () => {
+    expect(shouldUseWebGPU(
+      { api: true, adapter: true, shaderF16: false },
+      true,
+    )).toBe(false);
+  });
+
+  it('rejects WebGPU when Wllama cannot use it', () => {
+    expect(shouldUseWebGPU(
+      { api: true, adapter: true, shaderF16: true },
+      false,
+    )).toBe(false);
   });
 });
