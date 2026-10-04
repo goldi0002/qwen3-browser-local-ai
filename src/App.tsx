@@ -67,19 +67,19 @@ export default function App() {
     const started = performance.now();
     let generated = '';
     try {
-      const stream = await engine.current.createChatCompletion({
+      await engine.current.createChatCompletion({
         messages: next.map((m) => ({ role: m.role, content: m.content })),
         max_tokens: 512,
         temperature: 0.7,
         top_p: 0.9,
-        stream: true as const,
+        stream: true,
+        onData: (chunk) => {
+          const token = chunk.choices[0]?.delta?.content ?? '';
+          if (!token) return;
+          generated += token;
+          setMessages([...next, { role: 'assistant', content: generated }]);
+        },
       });
-      for await (const chunk of stream) {
-        const token = chunk.choices[0]?.delta?.content ?? '';
-        if (!token) continue;
-        generated += token;
-        setMessages([...next, { role: 'assistant', content: generated }]);
-      }
       const seconds = (performance.now() - started) / 1000;
       const estimatedTokens = generated.trim() ? generated.trim().split(/\s+/).length : 0;
       setTokensPerSecond(seconds > 0 ? estimatedTokens / seconds : null);
