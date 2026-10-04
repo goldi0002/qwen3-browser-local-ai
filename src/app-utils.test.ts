@@ -20,9 +20,7 @@ describe('toChatMessages', () => {
 
 describe('getStreamToken', () => {
   it('returns streamed text from a chunk', () => {
-    expect(getStreamToken({
-      choices: [{ delta: { content: 'Hello' } }],
-    })).toBe('Hello');
+    expect(getStreamToken({ choices: [{ delta: { content: 'Hello' } }] })).toBe('Hello');
   });
 
   it('returns an empty string when a chunk has no content', () => {
@@ -51,7 +49,11 @@ describe('formatError', () => {
     expect(formatError('Load failed', new Error('aborted'))).toBe('Load failed: aborted');
   });
 
-  it('uses a safe fallback for non-Error values', () => {
-    expect(formatError('Load failed', 'aborted')).toBe('Load failed.');
+  it('formats string errors', () => {
+    expect(formatError('Load failed', 'aborted')).toBe('Load failed: aborted');
+  });
+
+  it('provides a useful fallback for empty abort errors', () => {
+    expect(formatError('Load failed', new Error(''))).toContain('browser/WASM runtime aborted');
   });
 });
