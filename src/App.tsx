@@ -59,16 +59,13 @@ export default function App() {
   async function sendMessage() {
     const prompt = input.trim();
     if (!prompt || !engine.current || generating) return;
-
     const next = [...messages, { role: 'user' as const, content: prompt }];
     setMessages([...next, { role: 'assistant', content: '' }]);
     setInput('');
     setGenerating(true);
     setStatus('Generating…');
-
     const started = performance.now();
     let generated = '';
-
     try {
       const stream = await engine.current.createChatCompletion({
         messages: next.map((m) => ({ role: m.role, content: m.content })),
@@ -77,14 +74,12 @@ export default function App() {
         top_p: 0.9,
         stream: true as const,
       });
-
       for await (const chunk of stream) {
         const token = chunk.choices[0]?.delta?.content ?? '';
         if (!token) continue;
         generated += token;
         setMessages([...next, { role: 'assistant', content: generated }]);
       }
-
       const seconds = (performance.now() - started) / 1000;
       const estimatedTokens = generated.trim() ? generated.trim().split(/\s+/).length : 0;
       setTokensPerSecond(seconds > 0 ? estimatedTokens / seconds : null);
@@ -110,44 +105,12 @@ export default function App() {
   }
 
   return <main className="app">
-    <header className="hero">
-      <div>
-        <p className="eyebrow">100% local inference</p>
-        <h1>Qwen3 Browser AI</h1>
-        <p className="subtitle">Run Qwen3-0.6B Q8 GGUF directly on your Android browser.</p>
-      </div>
-      <div className="badge">{runtimeLabel}</div>
-    </header>
-
-    <section className="card setup">
-      <div className="setup-copy">
-        <h2>Local model</h2>
-        <p>Select the GGUF file from your phone. It is passed directly to Wllama in the browser and is never uploaded by this app.</p>
-        {modelFile && <div className="filename">{modelFile.name} · {(modelFile.size / 1024 / 1024).toFixed(0)} MB</div>}
-      </div>
-      <div className="actions">
-        <button onClick={() => fileInput.current?.click()} disabled={loading || generating}>{loading ? 'Loading…' : 'Choose .gguf'}</button>
-        <input ref={fileInput} type="file" accept=".gguf,application/octet-stream" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void selectModel(f); }} />
-        <button className="secondary" onClick={() => void unload()} disabled={!engine.current || loading || generating}>Unload</button>
-      </div>
+    <header className="hero"><div><p className="eyebrow">100% local inference</p><h1>Qwen3 Browser AI</h1><p className="subtitle">Run Qwen3-0.6B Q8 GGUF directly on your Android browser.</p></div><div className="badge">{runtimeLabel}</div></header>
+    <section className="card setup"><div className="setup-copy"><h2>Local model</h2><p>Select the GGUF file from your phone. It is passed directly to Wllama in the browser and is never uploaded by this app.</p>{modelFile&&<div className="filename">{modelFile.name} · {(modelFile.size/1024/1024).toFixed(0)} MB</div>}</div><div className="actions"><button onClick={()=>fileInput.current?.click()} disabled={loading||generating}>{loading?'Loading…':'Choose .gguf'}</button><input ref={fileInput} type="file" accept=".gguf,application/octet-stream" hidden onChange={e=>{const f=e.target.files?.[0];if(f)void selectModel(f)}}/><button className="secondary" onClick={()=>void unload()} disabled={!engine.current||loading||generating}>Unload</button></div></section>
+    <section className="card chat"><div className="chat-head"><div><h2>Chat</h2><span>{status}</span></div>{tokensPerSecond!==null&&<strong>{tokensPerSecond.toFixed(1)} tok/s</strong>}</div>
+      <div className="messages" aria-live="polite">{messages.length===0?<div className="empty"><span>⚡</span><p>Load Qwen3 locally, then send a message to benchmark browser inference.</p></div>:messages.map((m,i)=><div className={`message ${m.role}`} key={i}><div className="role">{m.role==='user'?'You':'Qwen3'}</div><div className="bubble">{m.content||'…'}</div></div>)}</div>
+      <div className="composer"><textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void sendMessage()}}} placeholder={canChat?'Ask Qwen3 anything…':'Load a GGUF model first…'} disabled={!canChat} rows={2}/><button onClick={()=>void sendMessage()} disabled={!canChat||!input.trim()}>Send</button></div>
     </section>
-
-    <section className="card chat">
-      <div className="chat-head">
-        <div><h2>Chat</h2><span>{status}</span></div>
-        {tokensPerSecond !== null && <strong>{tokensPerSecond.toFixed(1)} tok/s</strong>}
-      </div>
-      <div className="messages" aria-live="polite">
-        {messages.length === 0
-          ? <div className="empty"><span>⚡</span><p>Load Qwen3 locally, then send a message to benchmark browser inference.</p></div>
-          : messages.map((m, i) => <div className={`message ${m.role}`} key={i}><div className="role">{m.role === 'user' ? 'You' : 'Qwen3'}</div><div className="bubble">{m.content || '…'}</div></div>)}
-      </div>
-      <div className="composer">
-        <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }} placeholder={canChat ? 'Ask Qwen3 anything…' : 'Load a GGUF model first…'} disabled={!canChat} rows={2} />
-        <button onClick={() => void sendMessage()} disabled={!canChat || !input.trim()}>Send</button>
-      </div>
-    </section>
-
-    <footer><span>Wllama + llama.cpp · no inference server</span><span>{'gpu' in navigator ? 'WebGPU API detected' : 'WebGPU API unavailable'}</span></footer>
+    <footer><span>Wllama + llama.cpp · no inference server</span><span>{'gpu' in navigator?'WebGPU API detected':'WebGPU API unavailable'}</span></footer>
   </main>;
 }
