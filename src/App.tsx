@@ -1,8 +1,15 @@
 import { useMemo, useRef, useState } from 'react';
 import { Wllama } from '@wllama/wllama';
 import wllamaWasmUrl from '@wllama/wllama/esm/wasm/wllama.wasm?url';
+import {
+  estimateTokensPerSecond,
+  formatError,
+  getStreamToken,
+  toChatMessages,
+  type ChatMessage,
+} from './app-utils';
 
-type Message = { role: 'user' | 'assistant'; content: string };
+type Message = ChatMessage;
 const CONFIG = { default: wllamaWasmUrl };
 
 export default function App() {
@@ -50,7 +57,7 @@ export default function App() {
     } catch (error) {
       engine.current = null;
       setGpu(null);
-      setStatus(error instanceof Error ? `Load failed: ${error.message}` : 'Load failed.');
+      setStatus(formatError('Load failed', error));
     } finally {
       setLoading(false);
     }
@@ -68,25 +75,23 @@ export default function App() {
     let generated = '';
     try {
       await engine.current.createChatCompletion({
-        messages: next.map((m) => ({ role: m.role, content: m.content })),
+        messages: toChatMessages(next),
         max_tokens: 512,
         temperature: 0.7,
         top_p: 0.9,
         stream: true,
         onData: (chunk) => {
-          const token = chunk.choices[0]?.delta?.content ?? '';
+          const token = getStreamToken(chunk);
           if (!token) return;
           generated += token;
           setMessages([...next, { role: 'assistant', content: generated }]);
         },
       });
-      const seconds = (performance.now() - started) / 1000;
-      const estimatedTokens = generated.trim() ? generated.trim().split(/\s+/).length : 0;
-      setTokensPerSecond(seconds > 0 ? estimatedTokens / seconds : null);
+      setTokensPerSecond(estimateTokensPerSecond(generated, performance.now() - started));
       setStatus('Ready');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Generation failed.';
-      setMessages([...next, { role: 'assistant', content: `Error: ${message}` }]);
+      const message = formatError('Generation failed', error);
+      setMessages([...next, { role: 'assistant', content: message }]);
       setStatus('Generation failed.');
     } finally {
       setGenerating(false);
