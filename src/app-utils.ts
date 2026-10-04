@@ -21,5 +21,12 @@ export function estimateTokensPerSecond(text: string, elapsedMs: number) {
 }
 
 export function formatError(prefix: string, error: unknown) {
-  return error instanceof Error ? `${prefix}: ${error.message}` : `${prefix}.`;
+  const message = error instanceof Error
+    ? error.message.trim()
+    : typeof error === 'string'
+      ? error.trim()
+      : '';
+
+  if (message) return `${prefix}: ${message}`;
+  return `${prefix}: the browser/WASM runtime aborted without a detailed error message.`;
 }

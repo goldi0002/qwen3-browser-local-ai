@@ -1,7 +1,7 @@
 {
   "name": "qwen3-browser-local-ai",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@wllama/wllama": "3.2.2",
+    "@wllama/wllama": "3.8.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
