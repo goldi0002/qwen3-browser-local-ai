@@ -115,10 +115,19 @@ export default function App() {
     };
 
     setStatus(useGpu ? 'Initializing WebGPU…' : 'Initializing WASM/CPU…');
-    await nextEngine.loadModel([file], options);
 
-    engine.current = nextEngine;
-    return nextEngine;
+    try {
+      await nextEngine.loadModel([file], options);
+      engine.current = nextEngine;
+      return nextEngine;
+    } catch (error) {
+      try {
+        await nextEngine.exit();
+      } catch {
+        // Ignore cleanup failures from an aborted worker.
+      }
+      throw error;
+    }
   }
 
   async function selectModel(file: File) {
