@@ -40,13 +40,11 @@ export default function App() {
       });
       const supportsGpu = engine.current.isSupportWebGPU();
       setGpu(supportsGpu);
+      setStatus(`Loading locally… ${supportsGpu ? 'WebGPU' : 'WASM/CPU'} runtime`);
       await engine.current.loadModel([file], {
         n_ctx: 4096,
         n_batch: 128,
         n_gpu_layers: supportsGpu ? 99 : 0,
-        progressCallback: ({ loaded, total }) => {
-          if (total) setStatus(`Loading locally… ${Math.round(loaded / total * 100)}%`);
-        },
       });
       setStatus(`Ready — ${supportsGpu ? 'WebGPU' : 'WASM/CPU'}`);
     } catch (error) {
@@ -77,7 +75,7 @@ export default function App() {
         max_tokens: 512,
         temperature: 0.7,
         top_p: 0.9,
-        stream: true,
+        stream: true as const,
       });
 
       for await (const chunk of stream) {
