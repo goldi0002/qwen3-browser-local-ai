@@ -5,8 +5,10 @@ import {
   estimateTokensPerSecond,
   formatError,
   getStreamToken,
+  shouldUseWebGPU,
   toChatMessages,
   type ChatMessage,
+  type WebGpuCapabilities,
 } from './app-utils';
 
 type Message = ChatMessage;
@@ -33,11 +35,7 @@ async function isGgufFile(file: File) {
   return String.fromCharCode(...bytes) === GGUF_MAGIC;
 }
 
-type WebGpuInfo = {
-  api: boolean;
-  adapter: boolean;
-  shaderF16: boolean;
-};
+type WebGpuInfo = WebGpuCapabilities;
 
 async function getWebGpuInfo(): Promise<WebGpuInfo> {
   const gpu = (navigator as Navigator & {
@@ -162,10 +160,7 @@ export default function App() {
       // Current Wllama WebGPU builds require shader-f16. Checking the adapter
       // first avoids a known Chromium abort on devices exposing WebGPU without
       // that feature.
-      const shouldUseGpu = webGpu.api &&
-        webGpu.adapter &&
-        webGpu.shaderF16 &&
-        wllamaSupportsGpu;
+      const shouldUseGpu = shouldUseWebGPU(webGpu, wllamaSupportsGpu);
 
       let activeEngine: Wllama | null = null;
 
