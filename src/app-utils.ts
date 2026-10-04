@@ -30,3 +30,20 @@ export function formatError(prefix: string, error: unknown) {
   if (message) return `${prefix}: ${message}`;
   return `${prefix}: the browser/WASM runtime aborted without a detailed error message.`;
 }
+
+
+export type WebGpuCapabilities = {
+  api: boolean;
+  adapter: boolean;
+  shaderF16: boolean;
+};
+
+export function shouldUseWebGPU(
+  capabilities: WebGpuCapabilities,
+  wllamaSupportsGpu: boolean,
+) {
+  return capabilities.api &&
+    capabilities.adapter &&
+    capabilities.shaderF16 &&
+    wllamaSupportsGpu;
+}
