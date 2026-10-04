@@ -201,7 +201,7 @@ export default function App() {
         `SharedArrayBuffer: ${typeof SharedArrayBuffer !== 'undefined' ? 'available' : 'unavailable'}`,
         `Cross-origin isolated: ${crossOriginIsolated ? 'yes' : 'no'}`,
         message,
-      ].join('\\n');
+      ].join('\n');
 
       setDiagnostics(runtime);
       setStatus(message);
